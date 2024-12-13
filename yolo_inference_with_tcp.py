@@ -173,6 +173,6 @@ class YOLOTCPApplication:
 
 
 if __name__ == "__main__":
-    dummy_gpu_memory_ptr = 0x12345678  # Placeholder for GPU memory pointer
+    image_gpu_memory_ptr = 0x12345678  # Placeholder for GPU memory pointer
     app = YOLOTCPApplication(shared_library_path="./yolo_tcp_kernel.so", conf_threshold=0.1)
-    app.run(dummy_gpu_memory_ptr)
+    app.run(image_gpu_memory_ptr)
