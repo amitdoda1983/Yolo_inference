@@ -22,8 +22,7 @@ class YOLOInferenceHandler:
         """
         self.model = torch.hub.load('ultralytics/yolov5:v6.2', model_name).cuda()
         self.conf_threshold = conf_threshold
-        self.class_names = [
-            "person", "bicycle", "car", "motorbike", "airplane", "bus", "train", "truck", "boat", "traffic light",
+        self.class_names = ["person", "bicycle", "car", "motorbike", "airplane", "bus", "train", "truck", "boat", "traffic light",
             "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
             "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
             "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
@@ -31,8 +30,7 @@ class YOLOInferenceHandler:
             "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
             "potted plant", "bed", "dining table", "toilet", "TV", "laptop", "mouse", "remote", "keyboard",
             "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase",
-            "scissors", "teddy bear", "hair drier", "toothbrush"
-        ]
+            "scissors", "teddy bear", "hair drier", "toothbrush"]
 
     def preprocess_gpu_buffer(self, gpu_memory_ptr):
         """
