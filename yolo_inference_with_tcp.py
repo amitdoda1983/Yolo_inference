@@ -46,6 +46,7 @@ class YOLOInferenceHandler:
         cuda.memcpy_dtod(image_tensor.data_ptr(), gpu_memory_ptr, image_size)  # Copy raw data bytes
 
         # Reshape and normalize the tensor
+        image_tensor = image_tensor.view(height, width, channels)  # Reshape to HWC format
         image_tensor = image_tensor.float() / 255.0
         image_tensor = image_tensor.permute(2, 0, 1).unsqueeze(0)  # HWC -> CHW -> NCHW
 
