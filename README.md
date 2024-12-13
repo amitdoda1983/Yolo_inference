@@ -1,4 +1,4 @@
-# iith_GPU_inference
+# Yolo_inference
 
 #### compile cuda code
 nvcc -shared -Xcompiler -fPIC -o yolo_tcp_kernel.so cuda_kernel_http_server_with_yolo.cu
