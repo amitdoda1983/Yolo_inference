@@ -5,6 +5,12 @@ import pycuda.driver as cuda
 import pycuda.autoinit
 import cv2
 
+# CUDA image buffer dimensions (initialize as required)
+IMAGE_HEIGHT = 1250
+IMAGE_WIDTH = 1920
+IMAGE_CHANNELS = 3
+IMAGE_SIZE = IMAGE_HEIGHT * IMAGE_WIDTH * IMAGE_CHANNELS
+
 # YOLO Inference Handler
 class YOLOInferenceHandler:
     def __init__(self, model_name='yolov5s', conf_threshold=0.5):
@@ -16,7 +22,6 @@ class YOLOInferenceHandler:
         """
         self.model = torch.hub.load('ultralytics/yolov5:v6.2', model_name).cuda()
         self.conf_threshold = conf_threshold
-        self.image_size = (1250, 1920, 3)  # Fixed image size (height, width, channels)
         self.class_names = [
             "person", "bicycle", "car", "motorbike", "airplane", "bus", "train", "truck", "boat", "traffic light",
             "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
@@ -29,7 +34,7 @@ class YOLOInferenceHandler:
             "scissors", "teddy bear", "hair drier", "toothbrush"
         ]
 
-    def preprocess_gpu_buffer(self, gpu_memory):
+    def preprocess_gpu_buffer(self, gpu_memory_ptr):
         """
         Preprocess a GPU memory buffer containing raw image data for YOLO inference.
         Args:
@@ -37,16 +42,14 @@ class YOLOInferenceHandler:
         Returns:
             torch.Tensor: Preprocessed image tensor.
         """
-        height, width, channels = self.image_size
-        image_size = height * width * channels
-
+        
         # Create a dummy PyTorch ByteTensor on the GPU directly from raw byte data
         image_tensor = torch.cuda.ByteTensor(image_size)  # Allocate ByteTensor on GPU
-        cuda.memcpy_dtod(image_tensor.data_ptr(), gpu_memory, image_size)  # Copy raw data bytes
+        cuda.memcpy_dtod(image_tensor.data_ptr(), gpu_memory_ptr, image_size)  # Copy raw data bytes
 
         # Reshape and normalize the tensor
-        image_tensor = image_tensor.view(channels, height, width).float() / 255.0  # CHW format
-        image_tensor = image_tensor.unsqueeze(0)  # Add batch dimension
+        image_tensor = image_tensor.float() / 255.0
+        image_tensor = image_tensor.permute(2, 0, 1).unsqueeze(0)  # HWC -> CHW -> NCHW
 
         # Resize to 640x640 for YOLOv5
         image_tensor = torch.nn.functional.interpolate(image_tensor, size=(640, 640), mode='bilinear', align_corners=False)
@@ -112,7 +115,8 @@ class TCPPacketSender:
         Args:
             shared_library_path (str): Path to the compiled shared library.
         """
-        self.kernel_lib = ctypes.CDLL(shared_library_path)
+        # Load the shared library (CUDA kernel)
+        self.kernel_lib = ctypes.CDLL(shared_library_path) 
         self.kernel_lib.kernel_yolo_tcp_server.argtypes = [
             ctypes.c_void_p,  # CUDA stream
             ctypes.POINTER(ctypes.c_uint32),  # Exit condition pointer
@@ -121,19 +125,19 @@ class TCPPacketSender:
         ]
         self.kernel_lib.kernel_yolo_tcp_server.restype = ctypes.c_int
 
-    def launch_kernel(self, gpu_buffer_ptr, buffer_size):
+    def launch_kernel(self, inference_buffer_ptr, inference_buffer_size):
         """
         Launch the CUDA kernel with the inference results buffer.
         Args:
-            gpu_buffer_ptr (int): GPU buffer pointer.
-            buffer_size (int): Size of the GPU buffer in bytes.
+            gpu_buffer_ptr (int): Inference GPU buffer pointer.
+            buffer_size (int): Size of the Inference GPU buffer in bytes.
         """
         exit_cond = ctypes.c_uint32(0)  # Exit condition
         result = self.kernel_lib.kernel_yolo_tcp_server(
-            ctypes.c_void_p(0),  # Default CUDA stream
-            ctypes.byref(exit_cond),
-            ctypes.c_void_p(gpu_buffer_ptr),
-            buffer_size
+            ctypes.c_void_p(0),  # Passing Default CUDA stream
+            ctypes.byref(exit_cond), # passing Exit condition pointer
+            ctypes.c_void_p(inference_buffer_ptr), # passing Transmission queues pointer
+            inference_buffer_size # passing Buffer size
         )
         if result != 0:
             print("Kernel execution failed!")
@@ -143,14 +147,13 @@ class TCPPacketSender:
 
 # Main Application
 class YOLOTCPApplication:
-    def __init__(self, gpu_memory, shared_library_path='./yolo_tcp_kernel.so', conf_threshold=0.5):
-        self.gpu_memory = gpu_memory
+    def __init__(self, shared_library_path='./yolo_tcp_kernel.so', conf_threshold=0.5):
         self.yolo_handler = YOLOInferenceHandler(conf_threshold=conf_threshold)
         self.packet_sender = TCPPacketSender(shared_library_path=shared_library_path)
 
-    def run(self):
+    def run(self, gpu_memory_ptr):
         # Preprocess image from GPU memory
-        image_tensor = self.yolo_handler.preprocess_gpu_buffer(self.gpu_memory)
+        image_tensor = self.yolo_handler.preprocess_gpu_buffer(gpu_memory_ptr)
 
         # Perform YOLO inference
         predictions = self.yolo_handler.infer(image_tensor)
@@ -161,16 +164,17 @@ class YOLOTCPApplication:
 
         # Allocate GPU memory for the JSON buffer
         detections_bytes = detections_json.encode()
-        buffer_size = len(detections_bytes)
-        gpu_buffer = cuda.mem_alloc(buffer_size)
-        cuda.memcpy_htod(gpu_buffer, detections_bytes)
+        inference_buffer_size = len(detections_bytes)
+        inference_buffer_ptr = cuda.mem_alloc(inference_buffer_size)
+        
+        # copy json from host to cuda
+        cuda.memcpy_htod(inference_buffer, detections_bytes) 
 
         # Launch the kernel
-        self.packet_sender.launch_kernel(int(gpu_buffer), buffer_size)
+        self.packet_sender.launch_kernel(int(inference_buffer_ptr), inference_buffer_size)
 
 
 if __name__ == "__main__":
-    # Replace with the actual GPU memory pointer
-    dummy_gpu_memory = 0x12345678  # Placeholder for GPU memory pointer
-    app = YOLOTCPApplication(gpu_memory=dummy_gpu_memory, shared_library_path="./yolo_tcp_kernel.so", conf_threshold=0.5)
-    app.run()
+    dummy_gpu_memory_ptr = 0x12345678  # Placeholder for GPU memory pointer
+    app = YOLOTCPApplication(shared_library_path="./yolo_tcp_kernel.so", conf_threshold=0.1)
+    app.run(dummy_gpu_memory_ptr)
