@@ -32,8 +32,6 @@ class YOLOInferenceHandler:
         Initialize YOLO inference handler.
         Args:
         """
-       
-
     def preprocess_gpu_buffer(self, gpu_memory_ptr):
         """
         Preprocess a GPU memory buffer containing raw image data for YOLO inference.
@@ -41,8 +39,7 @@ class YOLOInferenceHandler:
             gpu_memory (int): Pointer to the GPU memory containing raw image data.
         Returns:
             torch.Tensor: Preprocessed image tensor.
-        """
-        
+        """        
         # Create a dummy PyTorch ByteTensor on the GPU directly from raw byte data
         image_tensor = torch.cuda.ByteTensor(image_size)  # Allocate ByteTensor on GPU
         cuda.memcpy_dtod(image_tensor.data_ptr(), gpu_memory_ptr, image_size)  # Copy raw data bytes
