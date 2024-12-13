@@ -11,26 +11,28 @@ IMAGE_WIDTH = 1920
 IMAGE_CHANNELS = 3
 IMAGE_SIZE = IMAGE_HEIGHT * IMAGE_WIDTH * IMAGE_CHANNELS
 
+conf_threshold = 0.1
+class_names = ["person", "bicycle", "car", "motorbike", "airplane", "bus", "train", "truck", "boat", "traffic light",
+    "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+    "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
+    "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+    "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
+    "potted plant", "bed", "dining table", "toilet", "TV", "laptop", "mouse", "remote", "keyboard",
+    "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase",
+    "scissors", "teddy bear", "hair drier", "toothbrush"]
+
+# Loading the model to cuda
+model = torch.hub.load('ultralytics/yolov5:v6.2', 'yolov5s').cuda()
+
 # YOLO Inference Handler
 class YOLOInferenceHandler:
-    def __init__(self, model_name='yolov5s', conf_threshold=0.5):
+    def __init__(self):
         """
         Initialize YOLO inference handler.
         Args:
-            model_name (str): YOLO model to load (e.g., 'yolov5s', 'yolov5m').
-            conf_threshold (float): Confidence threshold for filtering predictions.
         """
-        self.model = torch.hub.load('ultralytics/yolov5:v6.2', model_name).cuda()
-        self.conf_threshold = conf_threshold
-        self.class_names = ["person", "bicycle", "car", "motorbike", "airplane", "bus", "train", "truck", "boat", "traffic light",
-            "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
-            "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
-            "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
-            "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-            "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
-            "potted plant", "bed", "dining table", "toilet", "TV", "laptop", "mouse", "remote", "keyboard",
-            "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase",
-            "scissors", "teddy bear", "hair drier", "toothbrush"]
+       
 
     def preprocess_gpu_buffer(self, gpu_memory_ptr):
         """
@@ -69,7 +71,7 @@ class YOLOInferenceHandler:
             torch.Tensor: YOLO predictions.
         """
         with torch.no_grad():
-            return self.model(image_tensor)
+            return model(image_tensor)
 
     def postprocess(self, predictions):
         """
@@ -83,7 +85,7 @@ class YOLOInferenceHandler:
         boxes, scores = pred[:, :4], pred[:, 4]
         class_ids = pred[:, 5:].argmax(1)
         confidences = scores * pred[:, 5:].max(1).values
-        keep = confidences > self.conf_threshold
+        keep = confidences > conf_threshold
         return boxes[keep], confidences[keep], class_ids[keep]
 
     def serialize_detections(self, boxes, confidences, class_ids):
@@ -146,34 +148,36 @@ class TCPPacketSender:
 
 # Main Application
 class YOLOTCPApplication:
-    def __init__(self, shared_library_path='./yolo_tcp_kernel.so', conf_threshold=0.5):
-        self.yolo_handler = YOLOInferenceHandler(conf_threshold=conf_threshold)
+    def __init__(self, shared_library_path='./yolo_tcp_kernel.so'):
+        self.yolo_handler = YOLOInferenceHandler()
         self.packet_sender = TCPPacketSender(shared_library_path=shared_library_path)
 
     def run(self, gpu_memory_ptr):
-        # Preprocess image from GPU memory
-        image_tensor = self.yolo_handler.preprocess_gpu_buffer(gpu_memory_ptr)
-
-        # Perform YOLO inference
-        predictions = self.yolo_handler.infer(image_tensor)
-        boxes, confidences, class_ids = self.yolo_handler.postprocess(predictions)
-
-        # Serialize detections to JSON
-        detections_json = self.yolo_handler.serialize_detections(boxes, confidences, class_ids)
-
-        # Allocate GPU memory for the JSON buffer
-        detections_bytes = detections_json.encode()
-        inference_buffer_size = len(detections_bytes)
-        inference_buffer_ptr = cuda.mem_alloc(inference_buffer_size)
-        
-        # copy json from host to cuda
-        cuda.memcpy_htod(inference_buffer, detections_bytes) 
-
-        # Launch the kernel
-        self.packet_sender.launch_kernel(int(inference_buffer_ptr), inference_buffer_size)
-
+        while True:
+            # Preprocess image from GPU memory
+            image_tensor = self.yolo_handler.preprocess_gpu_buffer(gpu_memory_ptr)
+    
+            # Perform YOLO inference
+            predictions = self.yolo_handler.infer(image_tensor)
+            boxes, confidences, class_ids = self.yolo_handler.postprocess(predictions)
+    
+            # Serialize detections to JSON
+            detections_json = self.yolo_handler.serialize_detections(boxes, confidences, class_ids)
+    
+            # Allocate GPU memory for the JSON buffer
+            detections_bytes = detections_json.encode()
+            inference_buffer_size = len(detections_bytes)
+            inference_buffer_ptr = cuda.mem_alloc(inference_buffer_size)
+            
+            # copy json from host to cuda
+            cuda.memcpy_htod(inference_buffer, detections_bytes) 
+    
+            # Launch the kernel
+            self.packet_sender.launch_kernel(int(inference_buffer_ptr), inference_buffer_size)
+            
+            time.sleep(10)
 
 if __name__ == "__main__":
     image_gpu_memory_ptr = 0x12345678  # Placeholder for GPU memory pointer
-    app = YOLOTCPApplication(shared_library_path="./yolo_tcp_kernel.so", conf_threshold=0.1)
+    app = YOLOTCPApplication(shared_library_path="./yolo_tcp_kernel.so")
     app.run(image_gpu_memory_ptr)
