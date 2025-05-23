@@ -60,7 +60,6 @@
  #define CONF_THRESHOLD 0.25
 
  // Detection result structure
- // Detection result structure
  struct Detection {
     float bbox[4];    // [x, y, w, h] in pixels
     float conf;      // confidence score
