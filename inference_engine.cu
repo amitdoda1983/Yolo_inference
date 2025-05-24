@@ -60,6 +60,7 @@
  #define CONF_THRESHOLD 0.25
 
  // Detection result structure
+ // Detection result structure
  struct Detection {
     float bbox[4];    // [x, y, w, h] in pixels
     float conf;      // confidence score
@@ -105,8 +106,8 @@ __global__ void preprocess_kernel(const uint8_t* input, float* output,
     if (idx >= model_w * model_h) return;
     
     // mean and std values (based on the YOLOv5)
-    float mean[] = {0.485f, 0.456f, 0.406f};
-    float std[] = {0.229f, 0.224f, 0.225f};
+    // float mean[] = {0.485f, 0.456f, 0.406f};
+    // float std[] = {0.229f, 0.224f, 0.225f};
     
     // convert 1D index to 2D coordinates
     int x = idx % model_w;
@@ -125,13 +126,13 @@ __global__ void preprocess_kernel(const uint8_t* input, float* output,
         int input_idx = (input_y * input_w + input_x) * input_c + (2 - c);
         int output_idx = c * model_h * model_w + y * model_w + x;
         
-        // output[output_idx] = static_cast<float>(input[input_idx]) / 255.0f;
+        output[output_idx] = static_cast<float>(input[input_idx]) / 255.0f;
 
         // Normalize the pixel value to [0, 1]
-        float normalized_value = static_cast<float>(input[input_idx]) / 255.0f;
+        // float normalized_value = static_cast<float>(input[input_idx]) / 255.0f;
         
         // Apply YOLO-specific normalization (subtract mean and divide by std)
-        output[output_idx] = (normalized_value - mean[c]) / std[c];
+        // output[output_idx] = (normalized_value - mean[c]) / std[c];
 
     }
 }
@@ -519,10 +520,12 @@ cudaStream_t stream, int imgWidth, int imgHeight, int imgChannels) {
     input_data, preprocessedInput, 
     imgWidth, imgHeight, imgChannels, 
     inputW, inputH);
+    
+    // Wait for pre-process to complete
+    cudaStreamSynchronize(stream);
 
     // Copy preprocessed to input buffer
-    cudaMemcpyAsync(inputBuffer, preprocessedInput, inputSize,
-        cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyAsync(inputBuffer, preprocessedInput, inputSize, cudaMemcpyDeviceToDevice, stream);
     //************************************************************************//
 
     //  // Check if we need to copy input data
@@ -559,7 +562,7 @@ cudaStream_t stream, int imgWidth, int imgHeight, int imgChannels) {
     MAX_DETECTIONS, outputSize / sizeof(float), NUM_CLASSES,
     CONF_THRESHOLD, imgWidth, imgHeight);
     
-    // Wait for filteration to complete
+    // Wait for filter detection to complete
     cudaStreamSynchronize(stream);
 
     int filterCount;
